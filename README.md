@@ -8,7 +8,7 @@ Download the latest .exe from [Release](https://github.com/ahtishamdilawar/LoLQu
 
 Chose Run Anyway for error if you want to run the executable or you can build the code yourself!
 
--If you build it yourself wait a bit when running it first time as it will take some time to download icons from Data Dragon API
+-If you build it yourself wait a bit after running it first time as it will take some time to download icons from Data Dragon API
 
 ## Image
 ![image](https://github.com/user-attachments/assets/09e99dc4-53be-4951-8135-bfe8bfca987c)
