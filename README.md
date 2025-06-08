@@ -1,12 +1,12 @@
 # League of Legends Auto Queue & Champion Select Tool
 
-A lightweight Python app with a PyQt5 GUI that connects to the League Client’s LCU API using WebSocket to automate queue acceptance, champion banning, and picking.
+A lightweight Python app with a PyQt5 GUI that connects to the League Client’s LCU API for queue acceptance, champion banning, and picking.
 
 ## Download
 
 Download the latest .exe from [Release](https://github.com/ahtishamdilawar/LoLQueueAssist/releases/latest)
 
-No Python or setup required — just run and go!
+Chose Run Anyway for error if you want to run the executable or you can build the code yourself!
 
 ## Image
 ![image](https://github.com/user-attachments/assets/09e99dc4-53be-4951-8135-bfe8bfca987c)
