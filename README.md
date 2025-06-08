@@ -9,7 +9,8 @@ Download the latest .exe from [Release](https://github.com/ahtishamdilawar/LoLQu
 No Python or setup required — just run and go!
 
 ## Image
-![image](https://github.com/user-attachments/assets/a1be3711-4d4b-4b9d-9e5c-52bf000ee6c4)
+![image](https://github.com/user-attachments/assets/09e99dc4-53be-4951-8135-bfe8bfca987c)
+
 
 ## Features
 
