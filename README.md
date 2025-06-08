@@ -6,7 +6,7 @@ A lightweight Python app with a PyQt5 GUI that connects to the League Client’s
 
 Download the latest .exe from [Release](https://github.com/ahtishamdilawar/LoLQueueAssist/releases/latest)
 
-Chose Run Anyway for error if you want to run the executable or you can build the code yourself!
+Choose Run Anyway for error if you want to run the executable or you can build the code yourself!
 
 -If you build it yourself wait a bit after running it first time as it will take some time to download icons from Data Dragon API
 
