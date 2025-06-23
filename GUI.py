@@ -28,6 +28,8 @@ CACHE_FILE = resource_path("champion_cache.json")
 ICON_CACHE_DIR = resource_path("champion_icons")
 PICKS_FILE = resource_path("picks.txt")
 BANS_FILE = resource_path("bans.txt")
+PICKS_BANS_FILE = resource_path("picks_bans.json")
+ROLES = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
 
 def load_cached_data():
     if os.path.exists(CACHE_FILE):
@@ -311,6 +313,7 @@ class ChampionList(QWidget):
         self.placeholder_text = placeholder_text
         self.selected_champions = []
         self.champion_icons = {}
+        self.on_clear = None  # Callback for clear event
         self.init_ui()
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
@@ -323,15 +326,12 @@ class ChampionList(QWidget):
         header_layout = QHBoxLayout()
         title_label = QLabel(self.title)
         title_label.setObjectName("sectionTitle")
-        
         self.clear_btn = QPushButton("Clear")
         self.clear_btn.setObjectName("clearButton")
-        self.clear_btn.clicked.connect(self.clear_list)
-        
+        self.clear_btn.clicked.connect(self.handle_clear)
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         header_layout.addWidget(self.clear_btn)
-        
         layout.addLayout(header_layout)
         
         # Combo box
@@ -344,7 +344,6 @@ class ChampionList(QWidget):
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        
         scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         scroll_area.setMinimumHeight(200)  
         
@@ -368,6 +367,12 @@ class ChampionList(QWidget):
         
         self.setLayout(layout)
         
+    def handle_clear(self):
+        if self.on_clear:
+            self.on_clear()
+        else:
+            self.clear_list()
+
     def set_champion_icons(self, champion_icons):
         self.champion_icons = champion_icons
         self.update_display()
@@ -404,70 +409,127 @@ class ChampionList(QWidget):
 
 
 class ChampionSelectWidget(QWidget):
-    picks_bans_updated = pyqtSignal(list, list)
+    picks_bans_updated = pyqtSignal(dict)
     
     def __init__(self):
         super().__init__()
         self.champions_data = {}
         self.champion_icons = {}
+        self.selected_role = "TOP"
+        self.picks_bans = {role: {"picks": [], "bans": []} for role in ROLES}
         self.init_ui()
         QTimer.singleShot(0, self.load_saved_data)
         
     def init_ui(self):
         layout = QVBoxLayout()
         layout.setSpacing(25)
-        
+        # Role selector
+        role_layout = QHBoxLayout()
+        role_label = QLabel("Role:")
+        role_label.setStyleSheet("""
+            QLabel {
+                font-size: 18px;
+                font-weight: bold;
+                color: #F8FAFC;
+                padding-right: 10px;
+                letter-spacing: 1px;
+            }
+        """)
+        self.role_combo = ModernComboBox()
+        self.role_combo.addItems(ROLES)
+        self.role_combo.currentTextChanged.connect(self.on_role_changed)
+        role_layout.addWidget(role_label)
+        role_layout.addWidget(self.role_combo)
+        role_layout.addStretch()
+        layout.addLayout(role_layout)
         # Champion selection card
         card = ModernCard("Champion Selection")
         card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        
-        # Two column layout
         columns_layout = QHBoxLayout()
         columns_layout.setSpacing(30)
-
-        # Picks column
         self.picks_widget = ChampionList("Priority Picks", "Select champion to pick...")
         self.picks_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.picks_widget.combo.currentTextChanged.connect(self.on_pick_selected)
-        columns_layout.addWidget(self.picks_widget, 1)  # Equal stretch
-
-        # Bans column  
+        self.picks_widget.on_clear = self.on_clear_picks
+        columns_layout.addWidget(self.picks_widget, 1)
         self.bans_widget = ChampionList("Priority Bans", "Select champion to ban...")
         self.bans_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.bans_widget.combo.currentTextChanged.connect(self.on_ban_selected)
-        columns_layout.addWidget(self.bans_widget, 1)  # Equal stretch
-        
-        # Add columns to card content - NO addStretch() here
-        card.content_layout.addLayout(columns_layout, 1)  # Let it expand
-        
-        layout.addWidget(card, 1)  # Card takes all available space
-        
+        self.bans_widget.on_clear = self.on_clear_bans
+        columns_layout.addWidget(self.bans_widget, 1)
+        card.content_layout.addLayout(columns_layout, 1)
+        layout.addWidget(card, 1)
         self.setLayout(layout)
-    
+
+    def on_role_changed(self, role):
+        self.selected_role = role
+        self.update_displays()
+
     def load_saved_data(self):
-        """Load previously saved picks and bans"""
         try:
-            if os.path.exists("PICKS_FILE"):
-                with open("PICKS_FILE", "r", encoding="utf-8") as f:
-                    self.picks_widget.selected_champions = [line.strip() for line in f.readlines() if line.strip()]
-            
-            if os.path.exists("BANS_FILE"):
-                with open("BANS_FILE", "r", encoding="utf-8") as f:
-                    self.bans_widget.selected_champions = [line.strip() for line in f.readlines() if line.strip()]
-            
+            if os.path.exists(PICKS_BANS_FILE):
+                with open(PICKS_BANS_FILE, "r", encoding="utf-8") as f:
+                    self.picks_bans = json.load(f)
+            else:
+                # Migrate from old files if present
+                picks, bans = [], []
+                if os.path.exists("picks.txt"):
+                    with open("picks.txt", "r", encoding="utf-8") as f:
+                        picks = [line.strip() for line in f.readlines() if line.strip()]
+                if os.path.exists("bans.txt"):
+                    with open("bans.txt", "r", encoding="utf-8") as f:
+                        bans = [line.strip() for line in f.readlines() if line.strip()]
+                for role in ROLES:
+                    self.picks_bans[role]["picks"] = picks.copy()
+                    self.picks_bans[role]["bans"] = bans.copy()
+                self.save_all_roles()
             self.update_displays()
-            self.picks_bans_updated.emit(self.picks_widget.selected_champions, self.bans_widget.selected_champions)
+            self.picks_bans_updated.emit(self.picks_bans)
         except Exception as e:
             print(f"Error loading saved data: {e}")
-        
+
+    def save_all_roles(self):
+        try:
+            with open(PICKS_BANS_FILE, "w", encoding="utf-8") as f:
+                json.dump(self.picks_bans, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Error writing to {PICKS_BANS_FILE}: {e}")
+
+    def update_displays(self):
+        picks = self.picks_bans[self.selected_role]["picks"]
+        bans = self.picks_bans[self.selected_role]["bans"]
+        self.picks_widget.selected_champions = picks.copy()
+        self.bans_widget.selected_champions = bans.copy()
+        self.picks_widget.update_display()
+        self.bans_widget.update_display()
+
+    def on_pick_selected(self, champion_name):
+        if champion_name and not champion_name.startswith("Select champion"):
+            picks = self.picks_bans[self.selected_role]["picks"]
+            if champion_name not in picks:
+                picks.append(champion_name)
+                self.save_all_roles()
+                self.update_displays()
+                self.picks_bans_updated.emit(self.picks_bans)
+            self.picks_widget.combo.setCurrentIndex(0)
+
+    def on_ban_selected(self, champion_name):
+        if champion_name and not champion_name.startswith("Select champion"):
+            bans = self.picks_bans[self.selected_role]["bans"]
+            if champion_name not in bans:
+                bans.append(champion_name)
+                self.save_all_roles()
+                self.update_displays()
+                self.picks_bans_updated.emit(self.picks_bans)
+            self.bans_widget.combo.setCurrentIndex(0)
+
     def update_champions_data(self, champions_data):
         self.champions_data = champions_data
         self.download_champion_icons()
         self.populate_comboboxes()
-        # Update the lists with icon data
         self.picks_widget.set_champion_icons(self.champion_icons)
         self.bans_widget.set_champion_icons(self.champion_icons)
-        
+
     def download_champion_icons(self):
         for name, data in self.champions_data.items():
             path = download_icon(name, data['image_url'])
@@ -497,37 +559,18 @@ class ChampionSelectWidget(QWidget):
                 self.bans_widget.combo.addItem(icon, name)
             else:
                 self.bans_widget.combo.addItem(name)
-    
-    def save_to_file(self, filename, champion_list):
-        """Save champion list to file"""
-        try:
-            with open(filename, "w", encoding="utf-8") as f:
-                for champion in champion_list:
-                    f.write(champion + "\n")
-        except Exception as e:
-            print(f"Error writing to {filename}: {e}")
 
-    def on_pick_selected(self, champion_name):
-        if champion_name and not champion_name.startswith("Select champion"):
-            if champion_name not in self.picks_widget.selected_champions:
-                self.picks_widget.selected_champions.append(champion_name)
-                self.save_to_file("PICKS_FILE", self.picks_widget.selected_champions)
-                self.update_displays()
-                self.picks_bans_updated.emit(self.picks_widget.selected_champions, self.bans_widget.selected_champions)
-            self.picks_widget.combo.setCurrentIndex(0)
+    def on_clear_picks(self):
+        self.picks_bans[self.selected_role]["picks"] = []
+        self.save_all_roles()
+        self.update_displays()
+        self.picks_bans_updated.emit(self.picks_bans)
 
-    def on_ban_selected(self, champion_name):
-        if champion_name and not champion_name.startswith("Select champion"):
-            if champion_name not in self.bans_widget.selected_champions:
-                self.bans_widget.selected_champions.append(champion_name)
-                self.save_to_file("BANS_FILE", self.bans_widget.selected_champions)
-                self.update_displays()
-                self.picks_bans_updated.emit(self.picks_widget.selected_champions, self.bans_widget.selected_champions)
-            self.bans_widget.combo.setCurrentIndex(0)
-    
-    def update_displays(self):
-        self.picks_widget.update_display()
-        self.bans_widget.update_display()
+    def on_clear_bans(self):
+        self.picks_bans[self.selected_role]["bans"] = []
+        self.save_all_roles()
+        self.update_displays()
+        self.picks_bans_updated.emit(self.picks_bans)
 
 
 class LeagueAssistantApp(QMainWindow):

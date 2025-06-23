@@ -9,7 +9,10 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize, QObject
 from PyQt5.QtGui import QPixmap, QFont, QPalette, QColor, QIcon
 from lcu_driver import Connector
 import os
+import json
 
+PICKS_BANS_FILE = "picks_bans.json"
+ROLES = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
 
 class LCUConnector(QObject):
     """Handles League Client connection and automation"""
@@ -21,8 +24,8 @@ class LCUConnector(QObject):
         self.connector = Connector()
         self.summoner_id = None
         self.champions_map = {}
-        self.picks = []
-        self.bans = []
+        self.picks_bans = {role: {"picks": [], "bans": []} for role in ROLES}
+        self.current_role = "TOP"
         self.pick_number = 0
         self.ban_number = 0
         self.auto_accept_enabled = False
@@ -44,23 +47,25 @@ class LCUConnector(QObject):
     def load_picks_and_bans(self):
         """Load picks and bans from files"""
         try:
-            if os.path.exists("picks.txt"):
-                with open("picks.txt", "r", encoding="utf-8") as f:
-                    self.picks = [line.strip() for line in f.readlines() if line.strip()]
+            if os.path.exists(PICKS_BANS_FILE):
+                with open(PICKS_BANS_FILE, "r", encoding="utf-8") as f:
+                    self.picks_bans = json.load(f)
             else:
-                self.picks = []
-                
-            if os.path.exists("bans.txt"):
-                with open("bans.txt", "r", encoding="utf-8") as f:
-                    self.bans = [line.strip() for line in f.readlines() if line.strip()]
-            else:
-                self.bans = []
-                
-            self.game_event.emit(f"Loaded {len(self.picks)} picks and {len(self.bans)} bans from files")
+                for role in ROLES:
+                    self.picks_bans[role]["picks"] = []
+                    self.picks_bans[role]["bans"] = []
+            self.game_event.emit(f"Loaded picks and bans from {PICKS_BANS_FILE}")
         except Exception as e:
             self.game_event.emit(f"Error loading picks/bans: {str(e)}")
-            self.picks = []
-            self.bans = []
+            self.picks_bans = {role: {"picks": [], "bans": []} for role in ROLES}
+    
+    def save_picks_and_bans(self):
+        try:
+            with open(PICKS_BANS_FILE, "w", encoding="utf-8") as f:
+                json.dump(self.picks_bans, f, ensure_ascii=False, indent=2)
+            self.game_event.emit(f"Saved picks and bans to {PICKS_BANS_FILE}")
+        except Exception as e:
+            self.game_event.emit(f"Error saving picks/bans: {str(e)}")
     
     def setup_connector(self):
         """Setup LCU connector events"""
@@ -97,12 +102,25 @@ class LCUConnector(QObject):
 
         @self.connector.ws.register('/lol-champ-select/v1/session', event_types=('CREATE', 'UPDATE',))
         async def champ_select_changed(connection, event):
+            
             have_i_prepicked = False
             lobby_phase = event.data['timer']['phase']
             print(f"Lobby phase: {lobby_phase}, Current phase: {self.phase}")
             
             local_player_cell_id = event.data['localPlayerCellId']
-    
+            assigned_role = None
+            for teammate in event.data['myTeam']:
+                if teammate['cellId'] == local_player_cell_id:
+                    assigned_role = teammate.get('assignedPosition', 'TOP').upper()
+                    break
+            if assigned_role not in ROLES:
+                assigned_role = 'TOP'
+            self.current_role = assigned_role
+            picks = self.picks_bans.get(assigned_role, {}).get('picks', [])
+            bans = self.picks_bans.get(assigned_role, {}).get('bans', [])
+            self.picks = picks.copy()
+            self.bans = bans.copy()
+            
             if lobby_phase not in ['PLANNING', 'BAN_PICK', 'FINALIZATION'] or not event.data.get("actions"):
                 self.pick_number = 0
                 self.ban_number = 0
@@ -248,13 +266,13 @@ class LCUConnector(QObject):
         thread = Thread(target=run_connector, daemon=True)
         thread.start()
     
-    def update_picks_and_bans(self, picks, bans):
+    def update_picks_and_bans(self, picks_bans_dict, _=None):
         """Update the picks and bans lists"""
-        self.picks = picks.copy()
-        self.bans = bans.copy()
+        self.picks_bans = picks_bans_dict.copy()
+        self.save_picks_and_bans()
         self.pick_number = 0
         self.ban_number = 0
-        self.game_event.emit(f'Updated picks and bans: {len(picks)} picks, {len(bans)} bans')
+        self.game_event.emit(f'Updated picks and bans for all roles.')
     
     def set_auto_accept(self, enabled):
         """Enable/disable auto accept"""
