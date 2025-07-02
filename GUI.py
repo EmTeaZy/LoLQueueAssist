@@ -29,7 +29,7 @@ ICON_CACHE_DIR = resource_path("champion_icons")
 PICKS_FILE = resource_path("picks.txt")
 BANS_FILE = resource_path("bans.txt")
 PICKS_BANS_FILE = resource_path("picks_bans.json")
-ROLES = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
+ROLES = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "SUPPORT"]
 
 def load_cached_data():
     if os.path.exists(CACHE_FILE):
@@ -474,30 +474,11 @@ class ChampionSelectWidget(QWidget):
         self.picks_bans = {role: {"picks": [], "bans": []} for role in ROLES}
         self.init_ui()
         QTimer.singleShot(0, self.load_saved_data)
-        self.load_last_role()
         
     def init_ui(self):
         layout = QVBoxLayout()
-        layout.setSpacing(25)
-        # Role selector
-        role_layout = QHBoxLayout()
-        role_label = QLabel("Role:")
-        role_label.setStyleSheet("""
-            QLabel {
-                font-size: 18px;
-                font-weight: bold;
-                color: #F8FAFC;
-                padding-right: 10px;
-                letter-spacing: 1px;
-            }
-        """)
-        self.role_combo = ModernComboBox()
-        self.role_combo.addItems(ROLES)
-        self.role_combo.currentTextChanged.connect(self.on_role_changed)
-        role_layout.addWidget(role_label)
-        role_layout.addWidget(self.role_combo)
-        role_layout.addStretch()
-        layout.addLayout(role_layout)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         # Champion selection card
         card = ModernCard("Champion Selection")
         card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -526,7 +507,17 @@ class ChampionSelectWidget(QWidget):
         try:
             if os.path.exists(PICKS_BANS_FILE):
                 with open(PICKS_BANS_FILE, "r", encoding="utf-8") as f:
-                    self.picks_bans = json.load(f)
+                    loaded_data = json.load(f)
+                
+                needs_saving = False
+                if "UTILITY" in loaded_data and "SUPPORT" not in loaded_data:
+                    loaded_data["SUPPORT"] = loaded_data.pop("UTILITY")
+                    needs_saving = True
+                
+                self.picks_bans = loaded_data
+                
+                if needs_saving:
+                    self.save_all_roles()
             else:
                 # Migrate from old files if present
                 picks, bans = [], []
@@ -544,17 +535,6 @@ class ChampionSelectWidget(QWidget):
             self.picks_bans_updated.emit(self.picks_bans)
         except Exception as e:
             print(f"Error loading saved data: {e}")
-
-    def load_last_role(self):
-        try:
-            if os.path.exists("config.json"):
-                with open("config.json", "r") as f:
-                    config = json.load(f)
-                    last_role = config.get("last_selected_role", "TOP")
-                    if last_role in ROLES:
-                        self.role_combo.setCurrentText(last_role)
-        except Exception as e:
-            print(f"Error loading last role: {e}")
 
     def save_last_role(self):
         config = {}
@@ -774,16 +754,18 @@ class LeagueAssistantApp(QMainWindow):
         sidebar_layout.addWidget(self.notifications_widget)
         sidebar_layout.addStretch()
         
-        # Right main area - Champion selection
-        main_area = QWidget()
-        main_area_layout = QVBoxLayout(main_area)
-        main_area_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.champion_select_widget = ChampionSelectWidget()
-        main_area_layout.addWidget(self.champion_select_widget)
+        # Right main area - Champion selection tabs
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("roleTabs")
+        self.champion_select_widgets = []
+
+        for role in ROLES:
+            champion_select_widget = ChampionSelectWidget()
+            self.tabs.addTab(champion_select_widget, role)
+            self.champion_select_widgets.append(champion_select_widget)
         
         content_layout.addWidget(sidebar)
-        content_layout.addWidget(main_area)
+        content_layout.addWidget(self.tabs, 1)
         
         main_layout.addWidget(content_widget)
         
@@ -806,7 +788,7 @@ class LeagueAssistantApp(QMainWindow):
             QWidget {
                 background: transparent;
                 color: #F8FAFC;
-                font-family: 'Segoe UI', Arial, sans-serif;
+                font-family: 'Century Gothic';
             }
             
             #appTitle {
@@ -1010,6 +992,37 @@ class LeagueAssistantApp(QMainWindow):
                 font-size: 13px;
                 color: #94A3B8;
             }
+           
+           QTabWidget::pane {
+               border: 1px solid rgba(148, 163, 184, 0.1);
+               border-top: none;
+               border-radius: 0 0 12px 12px;
+               background: rgba(30, 41, 59, 0.8);
+           }
+
+           QTabBar::tab {
+               background: transparent;
+               border: 1px solid rgba(148, 163, 184, 0.1);
+               border-bottom: none;
+               padding: 10px 25px;
+               font-size: 14px;
+               font-weight: 600;
+               color: #94A3B8;
+               border-top-left-radius: 8px;
+               border-top-right-radius: 8px;
+               margin-right: 2px;
+           }
+
+           QTabBar::tab:hover {
+               background: rgba(51, 65, 85, 0.5);
+               color: #E2E8F0;
+           }
+
+           QTabBar::tab:selected {
+               background: rgba(30, 41, 59, 0.8);
+               border-color: rgba(148, 163, 184, 0.1);
+               color: #F8FAFC;
+           }
         """)
         
     def setup_connections(self):
@@ -1022,9 +1035,19 @@ class LeagueAssistantApp(QMainWindow):
         self.automation_widget.auto_select_changed.connect(self.lcu_connector.set_auto_select)
         
         # Champion select signals
-        self.champion_select_widget.picks_bans_updated.connect(self.lcu_connector.update_picks_and_bans)
+        for widget in self.champion_select_widgets:
+            widget.picks_bans_updated.connect(self.lcu_connector.update_picks_and_bans)
         self.notifications_widget.notifications_updated.connect(self.lcu_connector.update_notifications_config)
         
+        # Tab logic
+        self.tabs.currentChanged.connect(self.on_tab_changed)
+
+    def on_tab_changed(self, index):
+        champion_select_widget = self.tabs.widget(index)
+        if champion_select_widget:
+            role = self.tabs.tabText(index)
+            champion_select_widget.on_role_changed(role)
+
     def start_initialization(self):
         self.init_manager = InitializationManager(self.lcu_connector, self.champion_fetcher)
         self.init_manager.status_updated.connect(self.status_label.setText)
@@ -1036,7 +1059,12 @@ class LeagueAssistantApp(QMainWindow):
         self.init_manager.run()
 
     def on_champion_data_received(self, champions_data):
-        self.champion_select_widget.update_champions_data(champions_data)
+        for widget in self.champion_select_widgets:
+            widget.update_champions_data(champions_data)
+        
+        # Set initial role for the first tab
+        if self.champion_select_widgets:
+            self.on_tab_changed(self.tabs.currentIndex())
         
     def on_initialization_finished(self):
         self.status_label.setText("Ready")
@@ -1056,6 +1084,7 @@ class LeagueAssistantApp(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication([])
+    app.setFont(QFont("Century Gothic"))
     window = LeagueAssistantApp()
     window.show()
     app.exec_()
