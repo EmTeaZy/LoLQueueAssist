@@ -263,6 +263,61 @@ class AutomationControlWidget(QWidget):
         self.auto_select_changed.emit(enabled)
 
 
+class NotificationsWidget(QWidget):
+    notifications_updated = pyqtSignal(dict)
+
+    def __init__(self):
+        super().__init__()
+        self.init_ui()
+        self.load_settings()
+
+    def init_ui(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(20)
+        
+        notifications_card = ModernCard("Notifications")
+        
+        self.enable_notifications_toggle = ModernToggle("Enable WhatsApp Notifications")
+        self.enable_notifications_toggle.toggled.connect(self.save_settings)
+        notifications_card.add_widget(self.enable_notifications_toggle)
+        
+        layout.addWidget(notifications_card)
+        self.setLayout(layout)
+
+    def load_settings(self):
+        try:
+            if os.path.exists("config.json"):
+                with open("config.json", "r") as f:
+                    config = json.load(f)
+                    whatsapp_config = config.get("whatsapp_notifications", {})
+                    self.enable_notifications_toggle.setChecked(whatsapp_config.get("enabled", False))
+            else:
+                self.enable_notifications_toggle.setChecked(False)
+        except Exception as e:
+            print(f"Error loading notification settings: {e}")
+
+    def save_settings(self):
+        config = {}
+        try:
+            if os.path.exists("config.json"):
+                with open("config.json", "r") as f:
+                    config = json.load(f)
+        except Exception as e:
+            print(f"Error reading config file: {e}")
+
+        whatsapp_config = config.get("whatsapp_notifications", {})
+        whatsapp_config["enabled"] = self.enable_notifications_toggle.isChecked()
+        config["whatsapp_notifications"] = whatsapp_config
+
+        try:
+            with open("config.json", "w") as f:
+                json.dump(config, f, indent=4)
+            if "whatsapp_notifications" in config:
+                self.notifications_updated.emit(config["whatsapp_notifications"])
+        except Exception as e:
+            print(f"Error saving notification settings: {e}")
+
+
 class ChampionItem(QWidget):
     def __init__(self, champion_name, icon_path=None, index=1):
         super().__init__()
@@ -419,6 +474,7 @@ class ChampionSelectWidget(QWidget):
         self.picks_bans = {role: {"picks": [], "bans": []} for role in ROLES}
         self.init_ui()
         QTimer.singleShot(0, self.load_saved_data)
+        self.load_last_role()
         
     def init_ui(self):
         layout = QVBoxLayout()
@@ -464,6 +520,7 @@ class ChampionSelectWidget(QWidget):
     def on_role_changed(self, role):
         self.selected_role = role
         self.update_displays()
+        self.save_last_role()
 
     def load_saved_data(self):
         try:
@@ -487,6 +544,34 @@ class ChampionSelectWidget(QWidget):
             self.picks_bans_updated.emit(self.picks_bans)
         except Exception as e:
             print(f"Error loading saved data: {e}")
+
+    def load_last_role(self):
+        try:
+            if os.path.exists("config.json"):
+                with open("config.json", "r") as f:
+                    config = json.load(f)
+                    last_role = config.get("last_selected_role", "TOP")
+                    if last_role in ROLES:
+                        self.role_combo.setCurrentText(last_role)
+        except Exception as e:
+            print(f"Error loading last role: {e}")
+
+    def save_last_role(self):
+        config = {}
+        try:
+            if os.path.exists("config.json"):
+                with open("config.json", "r") as f:
+                    config = json.load(f)
+        except Exception as e:
+            print(f"Error reading config file: {e}")
+
+        config["last_selected_role"] = self.selected_role
+
+        try:
+            with open("config.json", "w") as f:
+                json.dump(config, f, indent=4)
+        except Exception as e:
+            print(f"Error saving last role: {e}")
 
     def save_all_roles(self):
         try:
@@ -573,14 +658,50 @@ class ChampionSelectWidget(QWidget):
         self.picks_bans_updated.emit(self.picks_bans)
 
 
+class InitializationManager(QObject):
+    status_updated = pyqtSignal(str)
+    initialization_finished = pyqtSignal()
+
+    def __init__(self, lcu_connector, champion_fetcher):
+        super().__init__()
+        self.lcu_connector = lcu_connector
+        self.champion_fetcher = champion_fetcher
+        self.tasks_finished = threading.Event()
+
+    def run(self):
+        thread = Thread(target=self._run_all, daemon=True)
+        thread.start()
+
+    def _run_all(self):
+        champion_thread = Thread(target=self._init_champions, daemon=True)
+        notification_thread = Thread(target=self._init_notifications, daemon=True)
+
+        champion_thread.start()
+        notification_thread.start()
+
+        champion_thread.join()
+        notification_thread.join()
+
+        self.initialization_finished.emit()
+
+    def _init_champions(self):
+        self.status_updated.emit("Initializing champions...")
+        self.champion_fetcher.run()
+
+    def _init_notifications(self):
+        self.status_updated.emit("Initializing notification system...")
+        self.lcu_connector.init_notification_system()
+
+
 class LeagueAssistantApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.lcu_connector = LCUConnector()
+        self.champion_fetcher = ChampionDataFetcher()
         self.init_ui()
         self.apply_modern_styles()
         self.setup_connections()
-        self.fetch_champion_data()
+        self.start_initialization()
         
         
         # Start LCU connector
@@ -648,6 +769,9 @@ class LeagueAssistantApp(QMainWindow):
         
         self.automation_widget = AutomationControlWidget()
         sidebar_layout.addWidget(self.automation_widget)
+
+        self.notifications_widget = NotificationsWidget()
+        sidebar_layout.addWidget(self.notifications_widget)
         sidebar_layout.addStretch()
         
         # Right main area - Champion selection
@@ -722,7 +846,7 @@ class LeagueAssistantApp(QMainWindow):
             }
             
             #sectionTitle {
-                font-size: 16px;
+                font-size: 14px;
                 font-weight: 600;
                 color: #F8FAFC;
             }
@@ -899,17 +1023,24 @@ class LeagueAssistantApp(QMainWindow):
         
         # Champion select signals
         self.champion_select_widget.picks_bans_updated.connect(self.lcu_connector.update_picks_and_bans)
+        self.notifications_widget.notifications_updated.connect(self.lcu_connector.update_notifications_config)
         
-    def fetch_champion_data(self):
-        self.champion_fetcher = ChampionDataFetcher()
+    def start_initialization(self):
+        self.init_manager = InitializationManager(self.lcu_connector, self.champion_fetcher)
+        self.init_manager.status_updated.connect(self.status_label.setText)
+        self.init_manager.initialization_finished.connect(self.on_initialization_finished)
+        
         self.champion_fetcher.data_fetched.connect(self.on_champion_data_received)
         self.champion_fetcher.error_occurred.connect(self.on_champion_data_error)
-        self.champion_fetcher.start()
         
+        self.init_manager.run()
+
     def on_champion_data_received(self, champions_data):
         self.champion_select_widget.update_champions_data(champions_data)
-        self.status_label.setText(f"Ready • {len(champions_data)} champions loaded")
         
+    def on_initialization_finished(self):
+        self.status_label.setText("Ready")
+
     def on_champion_data_error(self, error_message):
         self.status_label.setText(f"Error: {error_message}")
         QMessageBox.warning(self, "Error", error_message)

@@ -1,0 +1,22 @@
+{
+  "TOP": {
+    "picks": [],
+    "bans": []
+  },
+  "JUNGLE": {
+    "picks": [],
+    "bans": []
+  },
+  "MIDDLE": {
+    "picks": [],
+    "bans": []
+  },
+  "BOTTOM": {
+    "picks": [],
+    "bans": []
+  },
+  "UTILITY": {
+    "picks": [],
+    "bans": []
+  }
+}

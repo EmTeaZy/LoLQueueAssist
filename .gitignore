@@ -193,3 +193,7 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 pngegg.ico
+
+
+# Configuration
+config.json

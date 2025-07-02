@@ -1,0 +1,10 @@
+{
+    "whatsapp_notifications": {
+        "enabled": true,
+        "to_number": "YOUR_PHONE_NUMBER_HERE",
+        "twilio_sid": "YOUR_TWILIO_SID_HERE",
+        "twilio_token": "YOUR_TWILIO_TOKEN_HERE",
+        "from_number": "YOUR_TWILIO_WHATSAPP_NUMBER_HERE"
+    },
+    "last_selected_role": "TOP"
+}

@@ -1,7 +1,8 @@
 import requests
 import asyncio
+import time
 from threading import Thread
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
                              QWidget, QLabel, QPushButton, QCheckBox, QComboBox,
                              QScrollArea, QGridLayout, QFrame, QMessageBox, QLineEdit,
                              QTextEdit, QTabWidget, QSplitter)
@@ -10,6 +11,7 @@ from PyQt5.QtGui import QPixmap, QFont, QPalette, QColor, QIcon
 from lcu_driver import Connector
 import os
 import json
+from WhatsAppNotifier import send_notification
 
 PICKS_BANS_FILE = "picks_bans.json"
 ROLES = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
@@ -25,6 +27,7 @@ class LCUConnector(QObject):
         self.summoner_id = None
         self.champions_map = {}
         self.picks_bans = {role: {"picks": [], "bans": []} for role in ROLES}
+        self.notifications_config = {}
         self.current_role = "TOP"
         self.pick_number = 0
         self.ban_number = 0
@@ -40,10 +43,28 @@ class LCUConnector(QObject):
         self.phase = ''
         self.action_id = None
         
+        # Suppress insecure request warnings
+        requests.packages.urllib3.disable_warnings()
+
         # Load picks and bans on initialization
         self.load_picks_and_bans()
         self.setup_connector()
+
+        # Start game start polling
+        polling_thread = Thread(target=self.poll_game_start, daemon=True)
+        polling_thread.start()
     
+    def init_notification_system(self):
+        self.game_event.emit("Initializing notification system...")
+        try:
+            if os.path.exists("config.json"):
+                with open("config.json", "r") as f:
+                    config = json.load(f)
+                    self.notifications_config = config.get("whatsapp_notifications", {})
+            self.game_event.emit("Notification system initialized.")
+        except Exception as e:
+            self.game_event.emit(f"Error loading notification config: {str(e)}")
+
     def load_picks_and_bans(self):
         """Load picks and bans from files"""
         try:
@@ -223,17 +244,6 @@ class LCUConnector(QObject):
                 except Exception as e:
                     self.game_event.emit(f'Failed to pre-pick: {str(e)}')
             
-            # Game detection
-            if lobby_phase == 'FINALIZATION' and not self.in_game:
-                try:
-                    request_game_data = requests.get('https://127.0.0.1:2999/liveclientdata/allgamedata', verify=False)
-                    game_data = request_game_data.json()['gameData']['gameTime']
-                    if game_data > 0:
-                        self.game_event.emit("Game started!")
-                        self.in_game = True
-                except Exception:
-                    pass
-
         @self.connector.close
         async def disconnect(_):
             self.status_changed.emit(False)
@@ -254,6 +264,37 @@ class LCUConnector(QObject):
             # Log that picks and bans are preserved
             self.game_event.emit(f'Picks and bans preserved: {len(self.picks)} picks, {len(self.bans)} bans')
             
+    def poll_game_start(self):
+        """Polls the live client data endpoint to detect game start."""
+        while True:
+            try:
+                response = requests.get('https://127.0.0.1:2999/liveclientdata/allgamedata', verify=False)
+                if response.status_code == 200:
+                    game_data = response.json()
+                    if game_data.get('gameData', {}).get('gameTime', 0) > 0 and not self.in_game:
+                        self.in_game = True
+                        self.game_event.emit("Game started!")
+                        if self.notifications_config.get("enabled"):
+                            def send_and_log_notification():
+                                self.game_event.emit("Sending WhatsApp notification...")
+                                success = send_notification(
+                                    to_number=self.notifications_config.get("to_number"),
+                                    message="Your League of Legends game is starting now!",
+                                    twilio_sid=self.notifications_config.get("twilio_sid"),
+                                    twilio_token=self.notifications_config.get("twilio_token"),
+                                    from_number=self.notifications_config.get("from_number")
+                                )
+                                if success:
+                                    self.game_event.emit("WhatsApp notification sent successfully.")
+                                else:
+                                    self.game_event.emit("Failed to send WhatsApp notification.")
+
+                            notification_thread = Thread(target=send_and_log_notification, daemon=True)
+                            notification_thread.start()
+            except requests.exceptions.RequestException:
+                self.in_game = False # Reset when game ends or client closes
+            time.sleep(5)
+
     def start_connector(self):
         """Start the LCU connector in a separate thread"""
         def run_connector():
@@ -274,6 +315,10 @@ class LCUConnector(QObject):
         self.ban_number = 0
         self.game_event.emit(f'Updated picks and bans for all roles.')
     
+    def update_notifications_config(self, config):
+        self.notifications_config = config
+        self.game_event.emit("Updated WhatsApp notifications config.")
+
     def set_auto_accept(self, enabled):
         """Enable/disable auto accept"""
         self.auto_accept_enabled = enabled

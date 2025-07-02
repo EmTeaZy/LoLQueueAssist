@@ -58,39 +58,39 @@ class ChampionDataFetcher(QThread):
     error_occurred = pyqtSignal(str)
 
     def run(self):
-        try:
-            version_url = "https://ddragon.leagueoflegends.com/api/versions.json"
-            response = requests.get(version_url, timeout=10)
-            versions = response.json()
-            latest_version = versions[0]
+        cached_data = load_cached_data()
+        if cached_data:
+            self.data_fetched.emit(cached_data)
+        else:
+            try:
+                version_url = "https://ddragon.leagueoflegends.com/api/versions.json"
+                response = requests.get(version_url, timeout=10)
+                versions = response.json()
+                latest_version = versions[0]
 
-            base_url = "https://ddragon.leagueoflegends.com/cdn"
-            champions_url = f"{base_url}/{latest_version}/data/en_US/champion.json"
-            response = requests.get(champions_url, timeout=10)
-            champion_data = response.json()
+                base_url = "https://ddragon.leagueoflegends.com/cdn"
+                champions_url = f"{base_url}/{latest_version}/data/en_US/champion.json"
+                response = requests.get(champions_url, timeout=10)
+                champion_data = response.json()
 
-            champions = {}
-            for champ_key, champ_data in champion_data['data'].items():
-                champ_name = champ_data['name']
-                image_url = f"{base_url}/{latest_version}/img/champion/{champ_data['image']['full']}"
-                champions[champ_name] = {
-                    'id': champ_data['id'],
-                    'key': champ_data['key'],
-                    'name': champ_name,
-                    'title': champ_data['title'],
-                    'image_url': image_url
-                }
+                champions = {}
+                for champ_key, champ_data in champion_data['data'].items():
+                    champ_name = champ_data['name']
+                    image_url = f"{base_url}/{latest_version}/img/champion/{champ_data['image']['full']}"
+                    champions[champ_name] = {
+                        'id': champ_data['id'],
+                        'key': champ_data['key'],
+                        'name': champ_name,
+                        'title': champ_data['title'],
+                        'image_url': image_url
+                    }
 
-                # Ensure icon is cached
-                download_icon(champ_name, image_url)
+                    # Ensure icon is cached
+                    download_icon(champ_name, image_url)
 
-            save_cached_data(champions)
-            self.data_fetched.emit(champions)
+                save_cached_data(champions)
+                self.data_fetched.emit(champions)
 
-        except Exception as e:
-            print(f"Error fetching data: {e}")
-            cached_data = load_cached_data()
-            if cached_data:
-                self.data_fetched.emit(cached_data)
-            else:
+            except Exception as e:
+                print(f"Error fetching data: {e}")
                 self.error_occurred.emit(f"Failed to fetch and load champion data: {str(e)}")
